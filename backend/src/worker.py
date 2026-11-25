@@ -6,7 +6,8 @@ from tempfile import NamedTemporaryFile
 
 from src.config.settings import ARTIFACTS
 from src.models.database import cache
-from src.services.domain import compute
+from src.services.distances import resolve_all
+from src.services.domain import assemble, plan
 from src.services.workflow import claim_run, finish_run, publish_due
 from src.utils.exports import write_csv
 
@@ -14,7 +15,9 @@ from src.utils.exports import write_csv
 def calculate(job):
     key, claim, rows, options = job
     try:
-        report = compute(rows, options)
+        planned = plan(rows, options)
+        found = resolve_all(planned['pairs'], planned['band'], f'run-{key}')
+        report = assemble(planned, found)
         report['columns'] = list(dict.fromkeys(key for row in report['rows'] for key in row))
         report['metric_order'] = list(report['metrics'])
         json.dumps(report, allow_nan=False)

@@ -31,6 +31,8 @@
 
 在固定采样网格上，用带宽受限的动态时间规整累加绝对功率差，保留功率尺度。PAM 确定性选取实测会话作为中心，逐次执行使总距离降幅最大的单中心交换。每条会话列出最近与次近中心及其距离差。
 
+每对完整曲线的 DTW 距离按曲线内容与带宽持久化去重。批次更正后，曲线和带宽都相同的距离直接沿用，其余重算，中心与归属同从头计算一致；并发批次遇到同一对曲线和同一带宽只派一份计算；计算中断后，等待该距离的批次凭认领令牌接手续跑，已保存的距离不重算，迟到的旧结果不能覆盖接手后的结果；整批距离齐全后，归属结果才一次性发布到页面。
+
 采样缺点、重复或偏离网格的会话退出分群并留在复核表，整批暂缓发布。完整会话数不足时，补齐采样或降低分群数后再运行。会话标识冲突、时间格式或功率无效时，修正源 CSV 后重导。 复核问题为「这批会话的采样点是否齐全？各组中心曲线、组内离散度和归属依据是否足以支持早班交接？」。每次分析绑定数据版本和参数，原始数据按规范化内容的 SHA-256 去重。日程针对已复核的固定结果版本，每日模式按初次投递时间每 24 小时重复。停机期间错过多次时只补一份到站内收件箱，下一次回到原时间点。
 
 | 字段 | 含义 | 类型 |
@@ -60,7 +62,7 @@ docker compose exec -T backend python -m scripts.seed_demo
 | reviewer | reviewer-demo-24 | 复核、设置和停止投递、导出 |
 | viewer | viewer-demo-24 | 浏览结果、导出已批准的报告、查收投递 |
 
-原生 HTML/CSS/JavaScript 前端与 Nginx、FastAPI、Python worker、MySQL 8.0 和 Redis 组成五服务 Compose。`backend/src/services/domain.py` 存放业务算法，`domain.json` 定义字段与验收口径，`frontend/src/pages` 为业务页面。更新任一侧源文件后，用 `docker compose up -d --build` 重建对应镜像。`backend/src/constants/enums.py` 和 `frontend/src/constants/enums.js` 定义角色及运行状态。`.env` 支持前端、API、数据库端口、演示 seed 开关和 JWT 密钥。首次部署到非演示环境时更换演示身份及 JWT/数据库凭据。
+原生 HTML/CSS/JavaScript 前端与 Nginx、FastAPI、Python worker、MySQL 8.0 和 Redis 组成五服务 Compose。`backend/src/services/domain.py` 存放业务算法，`backend/src/services/distances.py` 维护跨批次的曲线距离缓存与单飞认领，`domain.json` 定义字段与验收口径，`frontend/src/pages` 为业务页面。更新任一侧源文件后，用 `docker compose up -d --build` 重建对应镜像。`backend/src/constants/enums.py` 和 `frontend/src/constants/enums.js` 定义角色及运行状态。`.env` 支持前端、API、数据库端口、演示 seed 开关和 JWT 密钥。首次部署到非演示环境时更换演示身份及 JWT/数据库凭据。后端增量计算测试：`docker compose exec backend python -m unittest tests.test_incremental -v`。
 
 `docker compose down` 停止服务并保留数据卷。现场数据和演示结果可以在各自版本中并存。
 

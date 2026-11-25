@@ -1,3 +1,5 @@
+import hashlib
+import json
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -100,6 +102,18 @@ def _dtw(left: tuple[float, ...], right: tuple[float, ...], band: int) -> float:
     return previous[-1]
 
 
+def curve_digest(curve: tuple[float, ...]) -> str:
+    """Content hash of one complete curve; identical curves share a digest."""
+    payload = json.dumps(list(curve), separators=(',', ':'), allow_nan=False)
+    return hashlib.sha256(payload.encode('utf-8')).hexdigest()
+
+
+def pair_key(left: str, right: str, band: int) -> str:
+    """Order-independent key of a curve pair at one alignment band (DTW is symmetric)."""
+    first, second = sorted((left, right))
+    return hashlib.sha256(f'{band}:{first}:{second}'.encode('utf-8')).hexdigest()
+
+
 def _k_medoids(distances: list[list[float]], count: int) -> list[int]:
     """PAM BUILD and best improving SWAP, using session order to break ties."""
     size = len(distances)
@@ -142,7 +156,8 @@ def _k_medoids(distances: list[list[float]], count: int) -> list[int]:
     return sorted(medoids)
 
 
-def compute(rows: list[dict], options: dict) -> dict:
+def plan(rows: list[dict], options: dict) -> dict:
+    """Validate a batch and list the unique curve pairs whose DTW distances it needs."""
     count = options.get('cluster_count', DEFAULT_CLUSTERS)
     band = options.get('warp_band', DEFAULT_BAND)
     if type(count) is not int or not 1 <= count <= MAX_CLUSTERS:
@@ -161,16 +176,36 @@ def compute(rows: list[dict], options: dict) -> dict:
         detail = '。待修正示例：' + '，'.join(examples) if examples else ''
         raise ValueError(f'完整会话仅 {size} 条，无法分为 {count} 群{detail}。请补齐采样、修正重复或网格错误；也可将分群数调至完整会话数以内。')
 
-    curves = [sessions[key].curve() for key in complete_ids]
-    distances = [[0.0] * size for _ in curves]
+    curves = {key: sessions[key].curve() for key in complete_ids}
+    digests = {key: curve_digest(curve) for key, curve in curves.items()}
+    pairs = {}
+    entries = []
     for i, j in combinations(range(size), 2):
-        distances[i][j] = distances[j][i] = _dtw(curves[i], curves[j], band)
-    medoids = _k_medoids(distances, count)
+        left, right = complete_ids[i], complete_ids[j]
+        key = pair_key(digests[left], digests[right], band)
+        pairs.setdefault(key, (curves[left], curves[right]))
+        entries.append((i, j, key))
+    return {'count': count, 'band': band, 'sessions': sessions, 'checks': checks,
+            'complete_ids': complete_ids, 'pairs': pairs, 'entries': entries, 'row_count': len(rows)}
+
+
+def assemble(planned: dict, distances: dict[str, float]) -> dict:
+    """Build the clustering report once every pair distance of the batch is known."""
+    count = planned['count']
+    band = planned['band']
+    sessions = planned['sessions']
+    checks = planned['checks']
+    complete_ids = planned['complete_ids']
+    size = len(complete_ids)
+    matrix = [[0.0] * size for _ in range(size)]
+    for i, j, key in planned['entries']:
+        matrix[i][j] = matrix[j][i] = distances[key]
+    medoids = _k_medoids(matrix, count)
 
     assignments = {}
     cluster_distances = {medoid: [] for medoid in medoids}
     cluster_labels = {medoid: f'第 {number} 群' for number, medoid in enumerate(medoids, start=1)}
-    for index, (key, row) in enumerate(zip(complete_ids, distances)):
+    for index, (key, row) in enumerate(zip(complete_ids, matrix)):
         ordered = sorted(medoids, key=lambda medoid: (row[medoid], medoid != index, medoid))
         medoid = ordered[0]
         runner_up = ordered[1] if count > 1 else None
@@ -238,7 +273,7 @@ def compute(rows: list[dict], options: dict) -> dict:
     return {
         'headline': headline,
         'metrics': {
-            '采样记录数': len(rows),
+            '采样记录数': planned['row_count'],
             '会话总数': len(sessions),
             '完整会话数': size,
             '待修正会话数': excluded,
@@ -265,3 +300,11 @@ def compute(rows: list[dict], options: dict) -> dict:
         },
         'can_publish': excluded == 0,
     }
+
+
+def compute(rows: list[dict], options: dict) -> dict:
+    """From-scratch report: plan the batch, compute every pair, assemble."""
+    planned = plan(rows, options)
+    band = planned['band']
+    distances = {key: _dtw(left, right, band) for key, (left, right) in planned['pairs'].items()}
+    return assemble(planned, distances)

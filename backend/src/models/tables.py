@@ -17,6 +17,12 @@ schedules = Table('report_schedules', metadata, Column('id', Integer, primary_ke
                   Column('run_id', Integer, nullable=False), Column('recipient', String(100), nullable=False),
                   Column('cadence', String(16), nullable=False), Column('next_at', Double, nullable=False, index=True),
                   Column('active', Integer, nullable=False), Column('owner', String(40), nullable=False))
+pair_distances = Table('curve_distances', metadata, Column('id', Integer, primary_key=True),
+                       Column('pair_key', String(64), nullable=False, unique=True),
+                       Column('band', Integer, nullable=False), Column('distance', Double),
+                       Column('state', String(16), nullable=False), Column('claim', String(32)),
+                       Column('claimed_by', String(64)), Column('claimed_at', Double),
+                       Column('created', Double, nullable=False), Column('finished', Double))
 deliveries = Table('report_deliveries', metadata, Column('id', Integer, primary_key=True),
                    Column('schedule_id', Integer, nullable=False), Column('run_id', Integer, nullable=False),
                    Column('recipient', String(100), nullable=False), Column('scheduled', Double, nullable=False),
